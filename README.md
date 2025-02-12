@@ -17,17 +17,6 @@ Joins accident, vehicle, and person data into a unified dataset
 Saves the processed data in Parquet format
 
 Provides basic analytics, such as total accidents per year
-
-Project Structure
-
-trafficData/
-├── data_processing.py  # Functions for data ingestion and transformation
-├── main.py             # Main script to orchestrate processing and analytics
-├── dataset/            # Directory to store processed data
-│   ├── processed/      # Output Parquet files
-│   ├── temp_s3_files/  # Temporary storage for S3 downloads
-└── README.md           # Project documentation
-
 Requirements
 
 Python 3.9+
