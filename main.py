@@ -1,4 +1,4 @@
-from data_processing import init_spark, process_files, load_parquet_files, rename_duplicate_columns
+from data_processing import init_spark, process_files, load_parquet_files, rename_duplicate_columns, check_data_quality
 
 PROCESSED_DATA_PATH = "dataset/processed"
 
@@ -7,13 +7,21 @@ def main():
     # Initialize Spark
     spark = init_spark()
 
+    year_from = 2016
+    year_to = 2021
+
     # Process raw CSV files
-    process_files(spark, "acc", source="s3",)
-    process_files(spark, "pers", source="s3",)
-    process_files(spark, "veh", source="s3",)
+    process_files(spark, "acc", source="s3", year_start=year_from, year_end=year_to)
+    process_files(spark, "pers", source="s3", year_start=year_from, year_end=year_to)
+    process_files(spark, "veh", source="s3", year_start=year_from, year_end=year_to)
 
     # Load processed Parquet files
     acc_df, veh_df, pers_df = load_parquet_files(spark, PROCESSED_DATA_PATH)
+
+    # Data Quality Checks
+    check_data_quality(acc_df, "Accidents", year_from, year_to)
+    check_data_quality(veh_df, "Vehicles", year_from, year_to)
+    check_data_quality(pers_df, "Persons", year_from, year_to)
 
     # Rename duplicate columns
     veh_df = rename_duplicate_columns(veh_df, "veh")

@@ -1,6 +1,7 @@
 import os
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import lit, col
+from pyspark.sql.functions import count, when
 
 import requests
 
@@ -26,15 +27,20 @@ def download_file_from_s3(file_url, local_path):
     else:
         raise Exception(f"Failed to download {file_url}, status code {response.status_code}")
 
-def process_files(spark, file_prefix, source="local", data_path="dataset/kaggle", output_path="dataset/processed", year_start = 16, year_end = 21):
+
+def process_files(spark, file_prefix, source="local", data_path="dataset/kaggle", output_path="dataset/processed",
+                  year_start=16, year_end=21):
     """
     Processes CSV files from a local directory or S3, unifies the schema, and saves as Parquet.
+
 
     :param spark: Spark session.
     :param file_prefix: File prefix (e.g., "acc", "pers", "veh").
     :param source: "local" for local files, "s3" for files from S3.
     :param data_path: Directory containing input files (used for local source).
     :param output_path: Directory for saving processed files.
+    :param year_start: Year start
+    :param year_end: Year end
     """
     S3_BASE_URL = "https://traffic-accident-data.s3.eu-north-1.amazonaws.com/"
     local_s3_path = "dataset/temp_s3_files"  # Local folder to save files from S3
@@ -60,8 +66,7 @@ def process_files(spark, file_prefix, source="local", data_path="dataset/kaggle"
 
     print(f"Processing {len(file_list)} files for prefix '{file_prefix}' from {source}")
 
-
-    # Ldentify unique columns (convert to lowercase for consistency)
+    # Identify unique columns (convert to lowercase for consistency)
     df_sample = spark.read.csv(file_list[0], header=True, inferSchema=True)
     final_columns = sorted([col.lower() for col in df_sample.columns])
 
@@ -88,7 +93,6 @@ def process_files(spark, file_prefix, source="local", data_path="dataset/kaggle"
     print(f"Saved unified dataset: {output_file}")
 
     return df_all
-
 
 
 def load_parquet_files(spark, processed_data_path):
@@ -126,3 +130,36 @@ def rename_duplicate_columns(df, prefix):
     :return: DataFrame with renamed columns.
     """
     return df.select([col(c).alias(f"{prefix}_{c}") if c != "casenum" else col(c) for c in df.columns])
+
+
+def check_data_quality(df, table_name, year_start, year_end):
+    """
+    Performs data quality checks on a DataFrame.
+
+    :param df: Spark DataFrame.
+    :param table_name: Name of the table (for logging purposes).
+    """
+    min_age = 0
+    max_age = 120
+    print(f"\n=== Data Quality Check: {table_name} ===\n")
+
+    # Check missed values
+    print("Missing values per column:")
+    df.select([count(when(col(c).isNull(), c)).alias(c) for c in df.columns]).show()
+
+    # Check anomalies
+    if "year" in df.columns:
+        print(f"Invalid YEAR values (should be between {year_start} and {year_end}):")
+        df.filter((col("year") < year_start) | (col("year") > year_end)).select("casenum", "year").show()
+
+    if "age" in df.columns:
+        print(f"Invalid AGE values (should be between {min_age} and {max_age}):")
+        df.filter((col("age") < min_age) | (col("age") > max_age)).select("casenum", "age").show()
+
+    if "casenum" in df.columns:
+        print("Checking CASENUM format (should be numeric):")
+        df.filter(~col("casenum").rlike("^[0-9]+$")).select("casenum").show()
+
+    # Check duplicates
+    print("Checking for duplicate CASENUMs:")
+    df.groupBy("casenum").count().filter(col("count") > 1).show()
