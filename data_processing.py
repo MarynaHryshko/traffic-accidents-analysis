@@ -4,6 +4,7 @@ from pyspark.sql.functions import lit, col
 from pyspark.sql.functions import count, when
 
 import requests
+import logging
 
 
 def init_spark(app_name="TrafficAccidents", driver_memory="8g", executor_memory="4g"):
@@ -16,6 +17,11 @@ def init_spark(app_name="TrafficAccidents", driver_memory="8g", executor_memory=
         .config("spark.executor.memory", executor_memory) \
         .getOrCreate()
 
+#Setup logging
+logging.basicConfig(filename='data_processing.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+def log_and_print(message):
+    print(message)
+    logging.info(message)
 
 def download_file_from_s3(file_url, local_path):
     """Load file from S3 and save local"""
@@ -23,8 +29,9 @@ def download_file_from_s3(file_url, local_path):
     if response.status_code == 200:
         with open(local_path, "wb") as f:
             f.write(response.content)
-        print(f"Downloaded {file_url} → {local_path}")
+        log_and_print(f"Downloaded {file_url} → {local_path}")
     else:
+        log_and_print(f"Failed to download {file_url}, status code {response.status_code}")
         raise Exception(f"Failed to download {file_url}, status code {response.status_code}")
 
 
@@ -62,10 +69,10 @@ def process_files(spark, file_prefix, source="local", data_path="dataset/kaggle"
         raise ValueError("Invalid source. Use 'local' or 's3'.")
 
     if not file_list:
-        print(f"No files found for prefix '{file_prefix}' from {source}")
+        log_and_print(f"No files found for prefix '{file_prefix}' from {source}")
         return None
 
-    print(f"Processing {len(file_list)} files for prefix '{file_prefix}' from {source}")
+    log_and_print(f"Processing {len(file_list)} files for prefix '{file_prefix}' from {source}")
 
     # Identify unique columns (convert to lowercase for consistency)
     df_sample = spark.read.csv(file_list[0], header=True, inferSchema=True)
@@ -92,7 +99,7 @@ def process_files(spark, file_prefix, source="local", data_path="dataset/kaggle"
     # Save to Parquet
     output_file = f"{output_path}/{file_prefix}.parquet"
     df_all.write.mode("overwrite").parquet(output_file)
-    print(f"Saved unified dataset: {output_file}")
+    log_and_print(f"Saved unified dataset: {output_file}")
 
     return df_all
 
@@ -120,7 +127,7 @@ def clean_data(df):
     # Fill gaps
     # df = df.fillna({"mod_year": 0, "numoccs": 1, "inj_sev": -1})
 
-    print("Data cleaning completed.")
+    log_and_print("Data cleaning completed.")
     return df
 
 
@@ -170,25 +177,25 @@ def check_data_quality(df, table_name, year_start, year_end):
     """
     min_age = 0
     max_age = 120
-    print(f"\n=== Data Quality Check: {table_name} ===\n")
+    log_and_print(f"\n=== Data Quality Check: {table_name} ===\n")
 
     # Check missed values
-    print("Missing values per column:")
+    log_and_print("Missing values per column:")
     df.select([count(when(col(c).isNull(), c)).alias(c) for c in df.columns]).show()
 
     # Check anomalies
     if "year" in df.columns:
-        print(f"Invalid YEAR values (should be between {year_start} and {year_end}):")
+        log_and_print(f"Invalid YEAR values (should be between {year_start} and {year_end}):")
         df.filter((col("year") < year_start) | (col("year") > year_end)).select("casenum", "year").show()
 
     if "age" in df.columns:
-        print(f"Invalid AGE values (should be between {min_age} and {max_age}):")
+        log_and_print(f"Invalid AGE values (should be between {min_age} and {max_age}):")
         df.filter((col("age") < min_age) | (col("age") > max_age)).select("casenum", "age").show()
 
     if "casenum" in df.columns:
-        print("Checking CASENUM format (should be numeric):")
+        log_and_print("Checking CASENUM format (should be numeric):")
         df.filter(~col("casenum").rlike("^[0-9]+$")).select("casenum").show()
 
     # Check duplicates
-    print("Checking for duplicate CASENUMs:")
+    log_and_print("Checking for duplicate CASENUMs:")
     df.groupBy("casenum").count().filter(col("count") > 1).show()
