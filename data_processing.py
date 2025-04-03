@@ -53,8 +53,9 @@ def process_files(spark, file_prefix, source="local", data_path="dataset/kaggle"
     elif source == "s3":
         file_list = []
         for year in range(year_start, year_end):
-            s3_url = f"{S3_BASE_URL}{file_prefix}_{year}.csv"
-            local_file = os.path.join(local_s3_path, f"{file_prefix}_{year}.csv")
+            short_year = str(year)[-2:]
+            s3_url = f"{S3_BASE_URL}{file_prefix}_{short_year}.csv"
+            local_file = os.path.join(local_s3_path, f"{file_prefix}_{short_year}.csv")
             download_file_from_s3(s3_url, local_file)
             file_list.append(local_file)
     else:
@@ -85,6 +86,7 @@ def process_files(spark, file_prefix, source="local", data_path="dataset/kaggle"
         df = load_and_align_schema(file)
         df_all = df_all.unionByName(df, allowMissingColumns=True)
 
+    df_all = df_all.transform(clean_data)
     df_all.printSchema()
 
     # Save to Parquet
@@ -93,6 +95,33 @@ def process_files(spark, file_prefix, source="local", data_path="dataset/kaggle"
     print(f"Saved unified dataset: {output_file}")
 
     return df_all
+
+
+def clean_data(df):
+    """
+    Clean the dataset by filtering anomalies and handling missing values.
+    """
+    # Filter anomalies
+    if "year" in df.columns:
+        df = df.filter((col("year") >= 2000) & (col("year") <= 2025))
+
+    if "casenum" in df.columns:
+        df = df.filter(col("casenum").rlike("^[0-9]+$"))
+
+    if "age" in df.columns:
+        df = df.filter((col("age") >= 0) & (col("age") <= 120))
+
+    if "mod_year" in df.columns and "year" in df.columns:
+        df = df.filter(col("mod_year") <= col("year"))
+
+    # Delete duplicates
+    df = df.dropDuplicates()
+
+    # Fill gaps
+    # df = df.fillna({"mod_year": 0, "numoccs": 1, "inj_sev": -1})
+
+    print("Data cleaning completed.")
+    return df
 
 
 def load_parquet_files(spark, processed_data_path):
